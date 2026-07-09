@@ -55,6 +55,15 @@ New-Item $vtp -Force | Out-Null
 Set-ItemProperty $vtp -Name 'HideRansomwareRecovery' -Value 1 -Type DWord
 Write-JobLog 'OneDrive ransomware-recovery nag hidden (all users).'
 
+# --- 3b. hide the Account protection section entirely (machine-wide policy) --------
+# Win11 26100+ shows a "Sign in with Microsoft" promo card that ignores the
+# per-user dismissal value. Our fleet uses local accounts, so hide the whole
+# section - same documented-policy approach as the OneDrive recovery nag.
+$ap = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Account protection'
+New-Item $ap -Force | Out-Null
+Set-ItemProperty $ap -Name 'UILockdown' -Value 1 -Type DWord
+Write-JobLog 'Account protection section hidden (all users).'
+
 # --- 4. dismiss Account-protection card for new users ------------------------------
 $asKey = 'HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{8f3a1c20-3b21-4c2a-9f10-7ad2e0c50003}'
 New-Item $asKey -Force | Out-Null
@@ -79,6 +88,7 @@ $checks = @(
     @{ name = 'Memory Integrity (HVCI) key = 1';           ok = (Test-RegVal $hvci 'Enabled' 1) },
     @{ name = 'Kernel-mode Stack Protection key = 1';      ok = (Test-RegVal $ks 'Enabled' 1) },
     @{ name = 'OneDrive recovery nag hidden';              ok = (Test-RegVal $vtp 'HideRansomwareRecovery' 1) },
+    @{ name = 'Account protection section hidden';         ok = (Test-RegVal $ap 'UILockdown' 1) },
     @{ name = 'Account-protection Active Setup armed';     ok = (Test-Path $asKey) }
 )
 Complete-Job -Checks $checks
