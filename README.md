@@ -1,63 +1,61 @@
 # qualit-provision
 
-Qualit (QCC) PC provisioning scripts, hosted here so Datto RMM always runs the
-**latest version** — edit here once, every future machine gets it. No secrets
-live in this repo: passwords arrive at runtime via Datto job variables.
+Qualit (QCC) PC provisioning, broken into **four independent Datto RMM quick
+jobs** that each pull their latest script from this repo at run time. Edit here
+once - every future machine gets it. **No secrets live in this repo**; passwords
+arrive at runtime via Datto job variables.
 
-## The flow (replaces the old all-in-one USB script)
+Every job **verifies its own work**: if the machine doesn't match the goal
+afterward, the job exits 1 (Datto shows FAILED) and POSTs a failure report -
+computer, job, error, log tail - to `https://provision.qualit.com/api/report`
+for alerting and automated diagnosis.
 
-1. **OOBE** (offline): create the local `Admin` account with the
-   `Shift+F10` -> `start ms-cxh:localonly` trick. Connect network after.
-2. **Install the site-specific Datto agent** — the ONLY thing on the provision
-   thumb drive (or download it from the Datto portal). Machine lands in the
-   right client site automatically.
-3. **Datto quick job: "Provision - Name + Accounts"** — renames the PC, sets the
-   Admin password, creates the standard `User` account. Reboots to apply.
-4. **Datto quick job: "Provision - Windows Updates"** — installs EVERYTHING
-   Windows Update offers, looping through reboots until up to date. Runs in the
-   background via a SYSTEM scheduled task that re-downloads the latest script
-   from this repo on every boot.
-5. Datto app installs (Chrome/Acrobat/Office/Zoom) + the config components
-   (default apps, taskbar, Windows Security) + final reboot.
+## The flow
+
+1. **OOBE** (offline): local `Admin` via `Shift+F10` -> `start ms-cxh:localonly`.
+   Connect network after. Install the **site-specific Datto agent** - the only
+   thing on the provision thumb drive (or download from the Datto portal).
+2. Quick job **Provision - Name + Accounts** (rename + Admin password; reboots)
+3. Quick job **Provision - Windows Updates** (background loop until up to date)
+4. Datto app installs: Chrome / Acrobat / Office / Zoom
+5. Quick job **Provision - User Experience** (User account + taskbar + defaults)
+6. Quick job **Provision - Windows Security** (+ reboot to engage Core Isolation)
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `Update-Windows.ps1` | The update loop. Downloaded and run on the machine; survives reboots; writes a live status file to the desktop. |
-| `Set-NameAndAccounts.ps1` | Rename + Admin/User accounts. Expects `PCName` and `AdminPassword` env vars (Datto variables). |
-| `datto-runner-updates.ps1` | PASTE THIS into the Datto component "Provision - Windows Updates". Downloads Update-Windows.ps1, arms the resume task, starts it, returns immediately. |
-| `datto-runner-name-accounts.ps1` | PASTE THIS into the Datto component "Provision - Name + Accounts". Add the two variables below. |
+| `lib/Common.ps1` | Shared logging, verification, failure reporting. Every job downloads it. |
+| `Set-NameAndAccounts.ps1` | Rename + Admin account. Vars: `PCName`, `AdminPassword`. Reboots. |
+| `Update-Windows.ps1` | Update loop; SYSTEM resume task re-pulls latest each boot; desktop status file. |
+| `Set-UserExperience.ps1` | `User` account + taskbar pins + Chrome/Acrobat defaults. Run AFTER apps. |
+| `Set-WindowsSecurity.ps1` | SmartScreen/PUA, Core Isolation (VBS+HVCI+kernel stacks), OneDrive nag, account card. Reboot after. |
+| `datto-runner-*.ps1` | PASTE these into the matching Datto component. |
 
 ## Datto component setup
 
-### Provision - Name + Accounts
-- Components -> New Component -> Scripts, PowerShell.
-- Paste `datto-runner-name-accounts.ps1`.
-- Add **Input Variables**: `PCName` (text) and `AdminPassword` (text/masked).
-  Datto passes variables to the script as environment variables.
-- Run as LocalSystem. The job reboots the machine at the end (rename).
+One component per runner file (Scripts, PowerShell, run as LocalSystem):
 
-### Provision - Windows Updates
-- Components -> New Component -> Scripts, PowerShell.
-- Paste `datto-runner-updates.ps1`. No variables.
-- Run as LocalSystem. The job returns in seconds; updates continue in the
-  background through as many reboots as needed.
+| Component name | Paste | Variables |
+|---|---|---|
+| Provision - Name + Accounts | `datto-runner-name-accounts.ps1` | `PCName` (text), `AdminPassword` (masked) |
+| Provision - Windows Updates | `datto-runner-updates.ps1` | none |
+| Provision - User Experience | `datto-runner-userexperience.ps1` | none |
+| Provision - Windows Security | `datto-runner-windowssecurity.ps1` | none |
 
-## How a tech knows the updates are running / done
+## Job results
 
-- Desktop file **`UPDATES RUNNING - STATUS.txt`** — live status: current round,
-  last activity timestamp. Reboots are normal. Update rounds can be silent for
-  30-60+ min.
-- Done = that file disappears and **`UPDATES COMPLETE.txt`** appears.
-- Full log: `C:\ProvTemp\update.log`.
-- Stuck? Last activity 90+ min old with no self-reboot -> check the log.
-- Re-running the updates job on a finished machine exits immediately by design.
-  To force a fresh run: delete `C:\ProvTemp\update-state.json` and re-run.
+- **Success** = job StdOut ends `JOB OK - all verifications passed.` (exit 0)
+- **Failure** = exit 1, Datto shows FAILED, and the failure was reported to
+  provision.qualit.com. Each VERIFY line in StdOut shows exactly which check
+  failed.
+- Updates job: returns in seconds; progress on the desktop
+  (`UPDATES RUNNING - STATUS.txt` -> `UPDATES COMPLETE.txt`), log at
+  `C:\ProvTemp\update.log`. Re-running on a finished machine exits immediately;
+  force a fresh run by deleting `C:\ProvTemp\update-state.json`.
 
-## Editing / maintaining
+## Maintaining
 
-Push to `main`. Machines always pull
-`https://raw.githubusercontent.com/andrewmcdonald2002/qualit-provision/main/...`
-at job start AND at every resume boot, so fixes take effect immediately —
-even for a machine mid-update-run.
+Push to `main` - machines pull the raw URLs at every job start and resume boot,
+so fixes take effect immediately, even mid-update-run. Keep scripts ASCII and
+secret-free (public repo).

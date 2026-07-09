@@ -34,6 +34,14 @@ $MaxRounds  = 12
 
 if (-not (Test-Path $WorkDir)) { New-Item -ItemType Directory -Path $WorkDir | Out-Null }
 
+# shared helpers (for Send-FailureReport); latest from GitHub, cached fallback
+$script:JobName = 'update'
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/andrewmcdonald2002/qualit-provision/main/lib/Common.ps1' -OutFile (Join-Path $WorkDir 'Common.ps1') -UseBasicParsing -TimeoutSec 60
+} catch {}
+try { . (Join-Path $WorkDir 'Common.ps1') } catch {}
+
 # --- logging + live status file ----------------------------------------------
 $script:StageLabel = 'Starting up'
 $script:StatusDone = $false
@@ -199,8 +207,11 @@ try {
         } catch {
             Write-Log "Could not install PSWindowsUpdate: $($_.Exception.Message)" 'ERROR'
             Write-Log 'Aborting - run Windows Update manually on this machine.' 'ERROR'
+            if (Get-Command Send-FailureReport -ErrorAction SilentlyContinue) {
+                Send-FailureReport -Detail "PSWindowsUpdate module install failed: $($_.Exception.Message)"
+            }
             Complete-Run -S $state
-            return
+            exit 1
         }
     }
     Import-Module PSWindowsUpdate -Force
@@ -210,6 +221,9 @@ try {
         $round = [int]$state.round
         if ($round -ge $MaxRounds) {
             Write-Log "Reached max update rounds ($MaxRounds); finalizing." 'WARN'
+            if (Get-Command Send-FailureReport -ErrorAction SilentlyContinue) {
+                Send-FailureReport -Detail "Hit max update rounds ($MaxRounds) without reaching 'up to date' - an update may be re-offering itself."
+            }
             Complete-Run -S $state
             return
         }
