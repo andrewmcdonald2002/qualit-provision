@@ -43,6 +43,29 @@ try {
     Write-JobLog "User account step failed: $($_.Exception.Message)" 'ERROR'
 }
 
+# --- 1b. suppress Windows "finish setting up your PC" nag (SCOOBE) ----------------
+# Applies to NEW profiles by writing into the Default user hive, and to any
+# already-created local profiles by walking their loaded/loadable hives.
+try {
+    reg load 'HKU\QccDefault' 'C:\Users\Default\NTUSER.DAT' | Out-Null
+    reg add 'HKU\QccDefault\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' /v ScoobeSystemSettingEnabled /t REG_DWORD /d 0 /f | Out-Null
+    [gc]::Collect()
+    reg unload 'HKU\QccDefault' | Out-Null
+    Write-JobLog 'SCOOBE (finish-setting-up nag) disabled for new profiles.'
+} catch {
+    Write-JobLog "SCOOBE default-profile step failed: $($_.Exception.Message)" 'WARN'
+}
+try {
+    Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match 'S-1-5-21-' -and $_.Name -notmatch '_Classes$' } |
+        ForEach-Object {
+            reg add "$($_.Name)\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement" /v ScoobeSystemSettingEnabled /t REG_DWORD /d 0 /f | Out-Null
+        }
+    Write-JobLog 'SCOOBE disabled for currently loaded user profiles.'
+} catch {
+    Write-JobLog "SCOOBE loaded-profiles step failed: $($_.Exception.Message)" 'WARN'
+}
+
 # --- 2. taskbar layout (Default profile) -----------------------------------------
 $layout = @'
 <?xml version="1.0" encoding="utf-8"?>
