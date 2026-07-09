@@ -43,6 +43,17 @@ try {
     Write-JobLog "User account step failed: $($_.Exception.Message)" 'ERROR'
 }
 
+# --- 1a. skip the first-sign-in privacy questionnaire for new users ---------------
+# Policy: OOBE privacy experience off. New accounts land straight on the desktop.
+try {
+    $oobe = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE'
+    New-Item $oobe -Force | Out-Null
+    Set-ItemProperty $oobe -Name 'DisablePrivacyExperience' -Value 1 -Type DWord
+    Write-JobLog 'First-sign-in privacy questionnaire disabled (DisablePrivacyExperience).'
+} catch {
+    Write-JobLog "Privacy-experience step failed: $($_.Exception.Message)" 'WARN'
+}
+
 # --- 1b. suppress Windows "finish setting up your PC" nag (SCOOBE) ----------------
 # Applies to NEW profiles by writing into the Default user hive, and to any
 # already-created local profiles by walking their loaded/loadable hives.
